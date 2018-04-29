@@ -1,0 +1,7 @@
+*.txt
+mols/
+
+*.zip
+*.tar
+*.7z
+*.iso

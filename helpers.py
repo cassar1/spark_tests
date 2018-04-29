@@ -25,6 +25,12 @@ def convertToBitVectorFP(line):
     return (elements[0], mol, fingerprint)
 
 
+def read_server():
+    with open("serverPath.txt") as f:
+        content = f.readline()
+        return content
+
+
 # Custom print method
 def output(x):
     print (x)
