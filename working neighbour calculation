@@ -1,0 +1,104 @@
+from __future__ import print_function
+from pyspark import SparkConf, SparkContext
+from pyspark.mllib.linalg.distributed import RowMatrix
+from pyspark.mllib.linalg import Vectors
+from pyspark.sql import SparkSession, Row
+from pyspark.sql import SQLContext
+
+import collections
+from rdkit import DataStructs
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem.Fingerprints import FingerprintMols
+
+conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
+#conf = SparkConf().setMaster("spark://192.168.1.10:7077").setAppName("MoleculesTests")
+sc = SparkContext(conf = conf)
+
+def convertToFP(line):
+    elements = line.split()
+    mol = ""
+    fingerprint = ""
+    if(elements[0] != 'smiles'):
+        mol = Chem.MolFromSmiles(elements[0])
+        fingerprint = AllChem.GetMorganFingerprint(mol,2)
+    return (elements[0], mol, fingerprint)
+
+# Convert to bit fingerprints
+def convertToBitVectorFP(line):
+    elements = line.split()
+    mol = ""
+    fingerprint = ""
+    if(elements[0] != 'smiles'):
+        mol = Chem.MolFromSmiles(elements[0])
+        fingerprint = AllChem.GetMorganFingerprintAsBitVect(mol,2, nBits=1024)
+        #base64Fp = fingerprint.ToBitString()
+    return (elements[0], mol, fingerprint)
+
+
+# Custom print method
+def output(x):
+    print (x)
+
+
+def calculate_tanimoto(fp1,fp2):
+    return DataStructs.FingerprintSimilarity(fp1,fp2, metric=DataStructs.TanimotoSimilarity)
+
+CREATE_VECTORS = False
+SIMILARITY_THRESHOLD = 0.1
+
+
+lines = sc.textFile("mols/compounds5.smi")
+smiles = lines.map(convertToBitVectorFP)
+
+print ("Read All data, length: ", smiles.count())
+
+# remove file headers
+smiles = smiles.filter(lambda l: l[0] != "smiles")
+
+print ("Filtered data, length: ", smiles.count())
+
+# select only the fingerprint part, since convertToBitVectorFP returns an object
+fingerprints = smiles.map(lambda x:x[2])
+
+# Add index to fingerprints
+fingerprints1 = fingerprints.zipWithIndex()
+
+
+# convert index and value position
+fingerprints1 = fingerprints1.map(lambda (x,y): (y,x))
+
+# fingerprints1.foreach(output)
+
+if CREATE_VECTORS:
+    # Change to Dense Vectors
+    fps = smiles.map(lambda x:Vectors.dense(x[2]))
+    fps.foreach(output)
+
+    mat = RowMatrix(fps)
+    exact = mat.columnSimilarities()
+    #approx = mat.columnSimilarities(0.05)
+
+    entries = exact.entries.collect()
+    for entry in entries:
+        print (entry)
+
+# create combinations for all the fingerprints, filter is used to calculate only half of the similarity matrix
+cartesian_fp = fingerprints1.cartesian(fingerprints1).filter(lambda (a,b): a[0] > b[0])
+# calculate similarities
+cartesian_fp = cartesian_fp.map(lambda (a, b): (a[0], b[0], calculate_tanimoto(a[1], b[1])))
+# keep only those that have similarity > threshold a = fp1, b = fp2, c = similarity
+similarities_fp = cartesian_fp.filter(lambda (a,b,c): c >= SIMILARITY_THRESHOLD)
+# sort by fp1
+similarities_fp = similarities_fp.sortBy(lambda (a, b, c): a)
+similarities_fp.foreach(output)
+# change the second fingerprint to a list of fingerprints
+similarities_fp = similarities_fp.map(lambda (a, b, c): (a, [b]))
+
+# combine the list of neighbours into key value, with key being the fingerprint, value being list of neighbours
+neighbours = similarities_fp.reduceByKey(lambda a, b: a + b).sortBy(lambda (a,b): len(b),False)
+
+#similarities_fp.collect()
+neighbours.collect()
+neighbours.foreach(output)
+
