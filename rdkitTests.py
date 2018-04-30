@@ -2,6 +2,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit import DataStructs
 
+SIMILARITY_THRESHOLD = 0.3
 
 def createFingerprint(mols, counts= False):
     fingerprints = []
@@ -57,7 +58,7 @@ def get_neighbours_list(fps, threshold):
 
 
 fingerprints = read_fingerprints("mols/compounds5.smi")
-tuple_list, neighbours_list = get_neighbours_list(fingerprints, 0.1)
+tuple_list, neighbours_list = get_neighbours_list(fingerprints, SIMILARITY_THRESHOLD)
 
 for tuple in tuple_list:
     print tuple
