@@ -9,8 +9,8 @@ from helpers import *
 
 
 server_location = read_server()
-conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
-#conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
+#conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
+conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
 sc = SparkContext(conf = conf)
 
 sc.addPyFile("helpers.py")
@@ -18,7 +18,7 @@ sc.addPyFile("helpers.py")
 CREATE_VECTORS = False
 SIMILARITY_THRESHOLD = 0.3
 
-lines = sc.textFile("mols/compounds14.smi")
+lines = sc.textFile("mols/compounds16.smi")
 smiles = lines.map(convertToBitVectorFP)
 
 print ("Read All data, length: ", smiles.count())
@@ -52,11 +52,11 @@ similarities_fp = similarities_fp.map(lambda (a, b, c): (a, set([b])))
 
 # combine the list of neighbours into key value, with key being the fingerprint, value being list of neighbours
 neighbours = similarities_fp.reduceByKey(lambda a, b: a.union(b))\
-    .sortBy(lambda (a,b): len(b),False)
+    .sortBy(lambda (a,b): (len(b), a), False)
 
 #similarities_fp.collect()
 #neighbours.collect()
-neighbours.foreach(output)
+#neighbours.foreach(output)
 print ("--------------------------------------------")
 overlapping_clusters = neighbours.map(lambda (a,b):b)\
                                 .zipWithIndex()\
@@ -66,15 +66,24 @@ print ("--------------------------------------------")
 #select first cluster as it would be lost in cartesian operation
 first_cluster = overlapping_clusters.filter(lambda (a,b): a == 0)
 
+#overlapping_clusters.foreach(output)
+
+print ("--------------------------------------------")
 # perform cartesian, with each cluster being grouped with clusters whose id is smaller (thus beign higher ranked)
+#.filter(lambda (a,b): a[0] > b[0])
 cluster_combs = overlapping_clusters.cartesian(overlapping_clusters).filter(lambda (a,b): a[0] > b[0])
+#cluster_combs.foreach(output)
+
+sorted_cluster_combs = cluster_combs.sortBy(lambda (a,b): a[0], False)
+#sorted_cluster_combs.foreach(output)
+
 cluster_combs = cluster_combs.map(lambda (a,b): (a[0],a[1].difference(b[1])))
 
 cluster_combs = cluster_combs.reduceByKey(lambda a, b: a.intersection(b))
 
 # combine all clusters, remove empty clusters and order by length descending
-cluster_combs = cluster_combs.union(first_cluster)\
-                            .filter(lambda (a,b): len(b) > 0)\
-                            .sortBy(lambda (a,b): len(b),False)
+cluster_combs = cluster_combs.union(first_cluster).filter(lambda (a,b): len(b) > 0).sortBy(lambda (a,b): (len(b),a),False)
+                            #.filter(lambda (a,b): len(b) > 0)\
 
+#cluster_combs.coalesce(2,False)
 cluster_combs.foreach(output)
