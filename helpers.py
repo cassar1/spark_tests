@@ -18,11 +18,13 @@ def convertToBitVectorFP(line):
     elements = line.split()
     mol = ""
     fingerprint = ""
-    if(elements[0] != 'smiles'):
+    if(elements[0] != 'smiles' and elements[0] != 'SMILES'):
         mol = Chem.MolFromSmiles(elements[0])
         #mol.SetProp("_Name",str(elements[1]))
         fingerprint = AllChem.GetMorganFingerprintAsBitVect(mol,2, nBits=1024)
         #base64Fp = fingerprint.ToBitString()
+    else:
+        print elements[0]
     return (elements[0], mol, fingerprint,elements[1])
 
 
@@ -41,7 +43,11 @@ def output_cluster(x):
 
 
 def calculate_tanimoto(fp1,fp2):
-    return DataStructs.FingerprintSimilarity(fp1,fp2, metric=DataStructs.TanimotoSimilarity)
+    try:
+
+        return DataStructs.FingerprintSimilarity(fp1,fp2, metric=DataStructs.TanimotoSimilarity)
+    except:
+        print "Error fp", fp1, " 2", fp2
 
 def toCSVLine(data):
     return ','.join(str(d) for d in data)
@@ -69,6 +75,44 @@ def index_to_mol(indeces, compound_list):
 
 def convert_to_smiles(cluster):
     print "x"
+
+
+def is_cluster_invalid(mol_id, potential_parents, complete_list):
+    invalid = cluster_invalid(potential_parents, complete_list)
+    if invalid:
+        return mol_id
+    else:
+        return -1
+
+# dataline = invalid molecule, neighbours, molecule invalidating the cluster
+# we need to check whether the molecule invalidating the cluster is valid itself
+# True cluster invalid
+# False Cluster Valid
+
+def cluster_invalid(potential_parents, complete_list):
+    # has_valid_parent = has_valid_parent(potential_parents, complete_list)
+    for parent in potential_parents:
+        # print "Searching potential Parent ", parent
+        mol_parents = get_mol_parents(parent, complete_list)
+        # print "Parents for molecule ", parent
+        if mol_parents is None:
+            # print "returning count ", count
+            return True
+
+        parent_invalid = cluster_invalid(mol_parents[1], complete_list)
+
+        # if any parent is valid, then this cluster is invalid
+        if parent_invalid is False:
+            return True
+    return False
+
+
+def get_mol_parents(mol_id, complete_list):
+    for row in complete_list:
+        if row[0] == mol_id:
+            # print "Found Grandparents", row
+            return row
+    return None
 
 def persistDataToFile(data):
     file = open("../mols/resultsSpark/result.smi","w+")
