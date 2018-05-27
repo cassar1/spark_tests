@@ -77,6 +77,8 @@ def convert_to_smiles(cluster):
     print "x"
 
 
+#region Recursion
+
 def is_cluster_invalid(mol_id, potential_parents, complete_list):
     invalid = cluster_invalid(potential_parents, complete_list)
     if invalid:
@@ -113,6 +115,38 @@ def get_mol_parents(mol_id, complete_list):
             # print "Found Grandparents", row
             return row
     return None
+
+#endregion Recursion
+
+#region count based
+def convert_neighbours(neighbours, complete_list):
+    neighbour_counts = []
+    for nbr in neighbours:
+        for row in complete_list:
+            if row[0] == nbr:
+                #print ("Row ", row[0], " NBR ", nbr)
+                neighbour_counts.append(row)
+                break
+    return neighbour_counts
+
+def assign_cluster(this_id, this_count, neighbours, invalid_clusters):
+    for nbr in neighbours:
+        if nbr[0] not in invalid_clusters:
+            if nbr[1] > this_count or (nbr[1] == this_count and this_id > nbr[0]):
+                return nbr[0]
+    return this_id
+
+#endregion count based
+
+#FOR TEST
+def remove_el(nbrs, item_to_remove):
+    nbrs.remove(item_to_remove)
+    nbrs.sort()
+    return nbrs
+
+def sort_list(nbrs):
+    nbrs.sort()
+    return nbrs
 
 def persistDataToFile(data):
     file = open("../mols/resultsSpark/result.smi","w+")
