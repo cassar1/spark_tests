@@ -33,7 +33,7 @@ fingerprints1 = compounds.map(lambda (x, idx): (idx, x[2]))
 
 bc_fingerprints = sc.broadcast(fingerprints1.collectAsMap())
 
-# create combinations for all the fingerprints, filter is used to calculate only half of the similarity matrix
+# create combinations for all the fingerprints, if condition is used to calculate only upper triangle of the similarity matrix
 cartesian_fp = fingerprints1.flatMap(lambda y: [(y, (x, bc_fingerprints.value[x])) for x in bc_fingerprints.value if x > y[0]])
 #cartesian_fp.foreach(output)
 
@@ -41,8 +41,10 @@ cartesian_fp = fingerprints1.flatMap(lambda y: [(y, (x, bc_fingerprints.value[x]
 similarities_fp = cartesian_fp.map(lambda (a, b): (a[0], b[0], calculate_tanimoto(a[1], b[1])))\
                               .filter(lambda (a,b,c): c >= SIMILARITY_THRESHOLD)
 
+#a new rdd is created to get the lower trangle of the similarity matrix
 inverted_similarities = similarities_fp.map(lambda (a,b,c): (b,a,c))
 
+# the complete catrix is obtained through union
 similarities_fp = similarities_fp.union(inverted_similarities).map(lambda (a, b, c): (a, set([b])))
 
 #similarities_fp.foreach(output)
