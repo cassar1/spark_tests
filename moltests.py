@@ -8,18 +8,18 @@ from sklearn.utils.extmath import cartesian
 
 from helpers import *
 
-EVALUATION = True
+EVALUATION = False
 
 server_location = read_server()
-conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
-#conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
+#conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
+conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
 sc = SparkContext(conf = conf)
 
 sc.addPyFile("helpers.py")
 
 CREATE_VECTORS = False
 SIMILARITY_THRESHOLD = 0.3
-dataFile = '../mols/merged/5000ABL1.smi'
+dataFile = '../mols/compounds82.smi'
 #dataFile = '../mols/merged/Reninmerged.smi'
 lines = sc.textFile(dataFile)
 
@@ -41,14 +41,14 @@ fingerprints1 = compounds.map(lambda (x, idx): (idx, x[2]))
 bc_fingerprints = sc.broadcast(fingerprints1.collectAsMap())
 # create combinations for all the fingerprints, filter is used to calculate only half of the similarity matrix
 cartesian_fp = fingerprints1.flatMap(lambda y: [(y, (x, bc_fingerprints.value[x])) for x in bc_fingerprints.value])
-#if x != y[0]
-# if x < y[0]
-#cartesian_fp.foreach(output)
+
 
 # keep only those that have similarity > threshold a = fp1, b = fp2, c = similarity
 similarities_fp = cartesian_fp.map(lambda (a, b): (a[0], b[0], calculate_tanimoto(a[1], b[1])))\
                               .filter(lambda (a,b,c): c >= SIMILARITY_THRESHOLD)\
-                              .map(lambda (a, b, c): (a, set([b])))
+                              .map(lambda (a, b, c): (a, set([b])))#\
+                              #.cache()
+
 #similarities_fp.foreach(output)
 
 # sort by fp1
@@ -56,13 +56,13 @@ similarities_fp = cartesian_fp.map(lambda (a, b): (a[0], b[0], calculate_tanimot
 # combine the list of neighbours into key value, with key being the fingerprint, value being list of neighbours
 neighbours = similarities_fp.reduceByKey(lambda a, b: a.union(b))\
     .filter(lambda (a,b): len(b) > 0)\
-    .map(lambda (a,b): (a,b,len(b)))
+    .map(lambda (a,b): (a,b,len(b)))#.cache()
 
 #test = neighbours.map(lambda (a,b,c): (a,list(b)))
 #test = test.map(lambda (a,b): (a,remove_el(b,a)))
 #test.sortBy(lambda (a,b):len(b),False).foreach(output)
 
-mol_neighbour_count = neighbours.map(lambda (a,b,c) : (a,c))
+mol_neighbour_count = neighbours.map(lambda (a,b,c) : (a,c))#.cache()
 
 #mol_neighbour_count.foreach(output)
 
@@ -113,73 +113,70 @@ for x in range(1,10):
     #    print (invalid)
 #    cluster_assignment = cluster_assignment.filter(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value)
 
-    cluster_assignment = cluster_assignment.map(lambda (a,b,c,d) : (a,b,c,assign_cluster(a, c, b, bc_invalid_clusters.value)))
+    cluster_assignment = cluster_assignment.map(lambda (a,b,c,d) : (a,b,c,assign_cluster(a, c, b, bc_invalid_clusters.value, d))).cache()
 
 
-    valid_clusters = cluster_assignment.filter(lambda (a,b,c,d): a == d)\
-                                        .map(lambda (a, b, c, d): a)
-    print("VALID")
-    valid_clusters.foreach(output)
+    #valid_clusters = cluster_assignment.filter(lambda (a,b,c,d): a == d)\
+    #                                    .map(lambda (a, b, c, d): a)
 
-    c_valid_clusters = valid_clusters.collect()
-    bc_valid_clusters = sc.broadcast(c_valid_clusters)
+    #c_valid_clusters = valid_clusters.collect()
+    #bc_valid_clusters = sc.broadcast(c_valid_clusters)
 
-
-    invalid_clusters = cluster_assignment.filter(lambda (a,b,c,d): a in bc_valid_clusters.value)\
+    print ("HERE 1")
+    invalid_clusters = cluster_assignment.filter(lambda (a,b,c,d): a == d)\
         .map(lambda (a,b,c,d): [mol[0] if mol[0] != a else None for mol in b])\
         .flatMap(lambda list: list)\
         .filter(lambda a : a is not None)
-
-    c_invalid_clusters = invalid_clusters.distinct().collect()
-
-    bc_invalid_clusters = sc.broadcast(c_invalid_clusters)
-
+    print("HERE 2")
+    #c_invalid_clusters = invalid_clusters.distinct().collect()
+    dist_invalids = invalid_clusters.collect()#.distinct()
+    bc_invalid_clusters = sc.broadcast(dist_invalids)
+    print("HERE 3")
     #bc_invalid_clusters = sc.broadcast(invalid_clusters.collect())
 
-    print("BEFORE")
+
+#    count_before = cluster_assignment.count()
+
+    cluster_assignment = cluster_assignment.filter(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value).cache()
+
+    #print("AFTER")
     #cluster_assignment.foreach(output)
 
-    count_before = cluster_assignment.count()
-    print ("BEFORE COUNT ", count_before)
+#    count_after = cluster_assignment.count()
+    #print("AFTER COUNT ", count_after)
 
-    cluster_assignment = cluster_assignment.filter(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value)
-
-    print("AFTER")
-    cluster_assignment.foreach(output)
-
-    count_after = cluster_assignment.count()
-    print("AFTER COUNT ", count_after)
-
-    if(count_before == count_after):
-        need_update = False
+#    if(count_before == count_after):
+#        need_update = False
     #END ITERATION 1
 
-print ("VALID CLUSTERS!!!!!")
+#print ("VALID CLUSTERS!!!!!")
 #valid_clusters.foreach(output)
-for valid in bc_valid_clusters.value:
-    print (valid)
+#for valid in bc_valid_clusters.value:
+#    print (valid)
 
-print ("---------------------INVALID CLUSTERS!!!!!")
-for invalid in bc_invalid_clusters.value:
-    print (invalid)
+#print ("---------------------INVALID CLUSTERS!!!!!")
+#for invalid in bc_invalid_clusters.value:
+#    print (invalid)
 
-cluster_assignment.foreach(output)
+#cluster_assignment.foreach(output)
 #cluster_assignment.sortBy(lambda (a,b,c,d): len(b), True).foreach(output)
 valid_nbrs = cluster_assignment.map(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): (mol_id, [x for x,y in nbr_counts]))
 #valid_nbrs.foreach(output)
-print("UPDATED COUNT", cluster_assignment.count())
+#print("UPDATED COUNT", cluster_assignment.count())
 
 cluster_combs = valid_nbrs.cartesian(valid_nbrs)\
     .filter(lambda (a,b): (len(a[1]) == len(b[1]) and a[0] >= b[0]) or (len(a[1]) < len(b[1])))
-print ("COMBINATIONS")
-cluster_combs.foreach(output)
+#print ("COMBINATIONS")
+#cluster_combs.foreach(output)
 
 cluster_combs = cluster_combs.map(lambda (a,b): (a[0], set(a[1]).difference(set(b[1]))) if a[0] != b[0] else (a[0], set(a[1])))
 
 cluster_combs = cluster_combs.reduceByKey(lambda a,b: a.intersection(b))
-cluster_combs = cluster_combs.sortBy(lambda (a,b): a)
-cluster_combs1 = cluster_combs.map(lambda (a,b): (sort_list(list(b))))
-cluster_combs1.foreach(output)
+if EVALUATION:
+    cluster_combs = cluster_combs.sortBy(lambda (a,b): a)
+    cluster_combs1 = cluster_combs.map(lambda (a,b): (sort_list(list(b))))
+#RESULT
+#cluster_combs1.foreach(output)
 
 '''
 cluster_combs = neighbours.cartesian(neighbours).filter(lambda (a,b): (len(a[1]) == len(b[1]) and a[0] <= b[0]) or (len(a[1]) < len(b[1])))

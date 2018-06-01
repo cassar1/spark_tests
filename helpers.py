@@ -129,7 +129,10 @@ def convert_neighbours(neighbours, complete_list):
                 break
     return neighbour_counts
 
-def assign_cluster(this_id, this_count, neighbours, invalid_clusters):
+def assign_cluster(this_id, this_count, neighbours, invalid_clusters, current_id):
+    if this_id == current_id:
+        return current_id
+
     for nbr in neighbours:
         if nbr[0] not in invalid_clusters:
             if nbr[1] > this_count or (nbr[1] == this_count and this_id > nbr[0]):
