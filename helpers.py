@@ -1,7 +1,6 @@
 from rdkit import DataStructs
 from rdkit import Chem
 from rdkit.Chem import AllChem
-from rdkit.Chem.rdmolfiles import SmilesWriter
 
 def convertToFP(line):
     elements = line.split()
@@ -73,10 +72,7 @@ def index_to_mol(indeces, compound_list):
     #cluster_id += 1
     writer.close()'''
 
-def convert_to_smiles(cluster):
-    print "x"
-
-
+'''
 #region Recursion
 
 def is_cluster_invalid(mol_id, potential_parents, complete_list):
@@ -117,7 +113,7 @@ def get_mol_parents(mol_id, complete_list):
     return None
 
 #endregion Recursion
-
+'''
 #region count based
 def convert_neighbours(neighbours, complete_list):
     neighbour_counts = []

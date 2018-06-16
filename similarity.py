@@ -5,15 +5,15 @@ from helpers import *
 EVALUATION = False
 FLATMAPMETHOD = True
 server_location = read_server()
-#conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
-conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
+conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
+#conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
 sc = SparkContext(conf = conf)
 
 sc.addPyFile("helpers.py")
 
 CREATE_VECTORS = False
 SIMILARITY_THRESHOLD = 0.3
-dataFile = '../mols/compounds17.smi'
+dataFile = '../mols/compounds82.smi'
 lines = sc.textFile(dataFile)
 
 smiles = lines.map(convertToBitVectorFP)
