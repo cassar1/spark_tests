@@ -114,6 +114,8 @@ def get_mol_parents(mol_id, complete_list):
 
 #endregion Recursion
 '''
+
+#return list of tuples (molecule, count of neighbours)
 #region count based
 def convert_neighbours(neighbours, complete_list):
     neighbour_counts = []
