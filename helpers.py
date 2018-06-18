@@ -1,6 +1,7 @@
 from rdkit import DataStructs
 from rdkit import Chem
 from rdkit.Chem import AllChem
+from operator import itemgetter
 
 def convertToFP(line):
     elements = line.split()
@@ -125,17 +126,30 @@ def convert_neighbours(neighbours, complete_list):
                 #print ("Row ", row[0], " NBR ", nbr)
                 neighbour_counts.append(row)
                 break
+    #neighbour_counts = sorted(neighbour_counts, key=itemgetter(1), reverse=True)
+    neighbour_counts = sorted(neighbour_counts, key=lambda x: (-x[1], x[0]))
+    #print ("Nbrs", neighbour_counts)
     return neighbour_counts
 
 def assign_cluster(this_id, this_count, neighbours, invalid_clusters, current_id):
     if this_id == current_id:
         return current_id
-
+    #print neighbours
     for nbr in neighbours:
         if nbr[0] not in invalid_clusters:
             if nbr[1] > this_count or (nbr[1] == this_count and this_id > nbr[0]):
                 return nbr[0]
+            else:
+                break
     return this_id
+
+def remove_invalid_nbrs(neighbours, invalid_clusters, cluster_owner):
+    valid_nbrs = []
+    if not cluster_owner:
+        for nbr in neighbours:
+            if nbr[0] not in invalid_clusters:
+                valid_nbrs.append(nbr)
+    return valid_nbrs
 
 #endregion count based
 

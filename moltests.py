@@ -12,7 +12,7 @@ EVALUATION = False
 FLATMAPMETHOD = True
 CREATE_VECTORS = False
 SIMILARITY_THRESHOLD = 0.3
-dataFile = '../mols/compounds5.smi'
+dataFile = '../mols/compounds18.smi'
 #dataFile = '../mols/merged/Reninmerged.smi'
 
 def main():
@@ -42,23 +42,42 @@ def main():
     bc_invalid_clusters = sc.broadcast([])
     #old_cluster_count = 0
     #need_update = True
-    for x in range(1,10):
-
+    bc_valid_condition = sc.broadcast(True)
+    iteration = 0
+    while bc_valid_condition.value:
+    #for x in range(1,10):
+        print ("----------------------------------ITERATION ",iteration ,"----------------------------------------------")
         cluster_assignment = cluster_assignment.map(lambda (mol_id,nb_count_tuple,mol_nbr_count,cluster_assigned) :
                                                     (mol_id,nb_count_tuple,mol_nbr_count,assign_cluster(mol_id, mol_nbr_count, nb_count_tuple, bc_invalid_clusters.value, cluster_assigned))).cache()
 
+        #cluster_assignment.foreach(output)
+
+        valid = cluster_assignment.filter(lambda (a,b,c,d): a == d)
+        #valid.foreach(output)
+        print("Number of valids:", valid.count())
 
         invalid_clusters = cluster_assignment.filter(lambda (a,b,c,d): a == d)\
             .map(lambda (a,b,c,d): [mol[0] if mol[0] != a else None for mol in b])\
             .flatMap(lambda list: list)\
             .filter(lambda a : a is not None)
 
-        dist_invalids = invalid_clusters.collect()#.distinct()
+        #invalid_clusters.distinct().foreach(output)
+
+        dist_invalids = invalid_clusters.distinct().collect()
+
         print("Invalids:", dist_invalids.__len__())
         bc_invalid_clusters = sc.broadcast(dist_invalids)
 
-        cluster_assignment = cluster_assignment.filter(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value).cache()
+        if dist_invalids.__len__() == 0:
+            bc_valid_condition = sc.broadcast(False)
+        else:
+            bc_valid_condition = sc.broadcast(True)
 
+        cluster_assignment = cluster_assignment.filter(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value).cache()
+        #cluster_assignment.foreach(output)
+        #cluster_assignment = cluster_assignment.map(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): (mol_id,[],mol_count, cluster_assigned))
+        cluster_assignment = cluster_assignment.map(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, remove_invalid_nbrs(nbr_counts, bc_invalid_clusters.value, mol_id == cluster_assigned), mol_count, cluster_assigned))
+        iteration+=1
 
     #remove tuple of neighbours, count
     valid_clusters = cluster_assignment.map(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): (mol_id, [x for x,y in nbr_counts]))
@@ -70,7 +89,7 @@ def main():
 
     cluster_combs = cluster_combs.reduceByKey(lambda a,b: a.intersection(b))
     print("Number of clusters:", cluster_combs.count())
-
+    cluster_combs.foreach(output)
     #if EVALUATION:
     #    cluster_combs = cluster_combs.sortBy(lambda (a,b): a)
     #    cluster_combs1 = cluster_combs.map(lambda (a,b): (sort_list(list(b))))
