@@ -12,7 +12,7 @@ EVALUATION = False
 FLATMAPMETHOD = True
 CREATE_VECTORS = False
 SIMILARITY_THRESHOLD = 0.3
-dataFile = '../mols/compounds18.smi'
+dataFile = '../mols/compounds5.smi'
 #dataFile = '../mols/merged/Reninmerged.smi'
 
 def main():
@@ -31,10 +31,11 @@ def main():
 
     mol_neighbour_count, neighbours = get_neighbours_counts(neighbours)
 
-    bc_mol_neighbour_count = sc.broadcast(mol_neighbour_count.collect())
+    bc_mol_neighbour_count = sc.broadcast(mol_neighbour_count.collectAsMap())
+    #mol_neighbour_count.foreach(output)
 
     #neighbours.foreach(output)
-    cluster_assignment = neighbours.map(lambda (a,b,c): (a, convert_neighbours(b, bc_mol_neighbour_count.value), c, -1))
+    cluster_assignment = neighbours.map(lambda (a,b,c): (a, convert_neighbours_dict(b, bc_mol_neighbour_count.value), c, -1))
     #cluster_assignment.foreach(output)
     print ("------------------------------------------")
     #assign cluster
@@ -61,9 +62,10 @@ def main():
             .flatMap(lambda list: list)\
             .filter(lambda a : a is not None)
 
+        
         #invalid_clusters.distinct().foreach(output)
 
-        dist_invalids = invalid_clusters.distinct().collect()
+        dist_invalids = invalid_clusters.collectAsMap()
 
         print("Invalids:", dist_invalids.__len__())
         bc_invalid_clusters = sc.broadcast(dist_invalids)
@@ -89,7 +91,7 @@ def main():
 
     cluster_combs = cluster_combs.reduceByKey(lambda a,b: a.intersection(b))
     print("Number of clusters:", cluster_combs.count())
-    cluster_combs.foreach(output)
+    #cluster_combs.foreach(output)
     #if EVALUATION:
     #    cluster_combs = cluster_combs.sortBy(lambda (a,b): a)
     #    cluster_combs1 = cluster_combs.map(lambda (a,b): (sort_list(list(b))))

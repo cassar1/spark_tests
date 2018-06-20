@@ -131,6 +131,13 @@ def convert_neighbours(neighbours, complete_list):
     #print ("Nbrs", neighbour_counts)
     return neighbour_counts
 
+def convert_neighbours_dict(neighbours, complete_list):
+    neighbour_counts = []
+    for nbr in neighbours:
+        neighbour_counts.append((nbr, complete_list[nbr]))
+    #neighbour_counts = sorted(neighbour_counts, key=lambda x: (-x[1], x[0]))
+    return neighbour_counts
+
 def assign_cluster(this_id, this_count, neighbours, invalid_clusters, current_id):
     if this_id == current_id:
         return current_id
