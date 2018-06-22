@@ -12,7 +12,7 @@ EVALUATION = False
 FLATMAPMETHOD = True
 CREATE_VECTORS = False
 SIMILARITY_THRESHOLD = 0.3
-dataFile = '../mols/compounds5.smi'
+dataFile = '../mols/compounds16.smi'
 #dataFile = '../mols/merged/Reninmerged.smi'
 
 def main():
@@ -32,7 +32,8 @@ def main():
     mol_neighbour_count, neighbours = get_neighbours_counts(neighbours)
 
     bc_mol_neighbour_count = sc.broadcast(mol_neighbour_count.collectAsMap())
-    #mol_neighbour_count.foreach(output)
+
+    #print(bc_mol_neighbour_count.value)
 
     #neighbours.foreach(output)
     cluster_assignment = neighbours.map(lambda (a,b,c): (a, convert_neighbours_dict(b, bc_mol_neighbour_count.value), c, -1))
@@ -62,9 +63,11 @@ def main():
             .flatMap(lambda list: list)\
             .filter(lambda a : a is not None)
 
-        
+        invalid_clusters = invalid_clusters.map(lambda a:(a,1))
+
         #invalid_clusters.distinct().foreach(output)
 
+        #dist_invalids = invalid_clusters.distinct().collect()
         dist_invalids = invalid_clusters.collectAsMap()
 
         print("Invalids:", dist_invalids.__len__())
@@ -78,7 +81,7 @@ def main():
         cluster_assignment = cluster_assignment.filter(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value).cache()
         #cluster_assignment.foreach(output)
         #cluster_assignment = cluster_assignment.map(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): (mol_id,[],mol_count, cluster_assigned))
-        cluster_assignment = cluster_assignment.map(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, remove_invalid_nbrs(nbr_counts, bc_invalid_clusters.value, mol_id == cluster_assigned), mol_count, cluster_assigned))
+        cluster_assignment = cluster_assignment.map(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, remove_invalid_nbrs_dict(nbr_counts, bc_invalid_clusters.value, mol_id == cluster_assigned), mol_count, cluster_assigned))
         iteration+=1
 
     #remove tuple of neighbours, count
@@ -104,8 +107,8 @@ def main():
 
 def start_spark():
     server_location = read_server()
-    conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
-    #conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
+    #conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
+    conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
     sc = SparkContext(conf=conf)
 
     sc.addPyFile("helpers.py")

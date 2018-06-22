@@ -123,7 +123,7 @@ def convert_neighbours(neighbours, complete_list):
     for nbr in neighbours:
         for row in complete_list:
             if row[0] == nbr:
-                #print ("Row ", row[0], " NBR ", nbr)
+                print ("Row ", row)
                 neighbour_counts.append(row)
                 break
     #neighbour_counts = sorted(neighbour_counts, key=itemgetter(1), reverse=True)
@@ -134,8 +134,9 @@ def convert_neighbours(neighbours, complete_list):
 def convert_neighbours_dict(neighbours, complete_list):
     neighbour_counts = []
     for nbr in neighbours:
+        #print ("Element, ",nbr," ", complete_list[nbr])
         neighbour_counts.append((nbr, complete_list[nbr]))
-    #neighbour_counts = sorted(neighbour_counts, key=lambda x: (-x[1], x[0]))
+    neighbour_counts = sorted(neighbour_counts, key=lambda x: (-x[1], x[0]))
     return neighbour_counts
 
 def assign_cluster(this_id, this_count, neighbours, invalid_clusters, current_id):
@@ -151,6 +152,14 @@ def assign_cluster(this_id, this_count, neighbours, invalid_clusters, current_id
     return this_id
 
 def remove_invalid_nbrs(neighbours, invalid_clusters, cluster_owner):
+    valid_nbrs = []
+    if not cluster_owner:
+        for nbr in neighbours:
+            if nbr[0] not in invalid_clusters:
+                valid_nbrs.append(nbr)
+    return valid_nbrs
+
+def remove_invalid_nbrs_dict(neighbours, invalid_clusters, cluster_owner):
     valid_nbrs = []
     if not cluster_owner:
         for nbr in neighbours:
