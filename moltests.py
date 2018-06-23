@@ -11,8 +11,8 @@ from helpers import *
 EVALUATION = False
 FLATMAPMETHOD = True
 CREATE_VECTORS = False
-SIMILARITY_THRESHOLD = 0.3
-dataFile = '../mols/compounds16.smi'
+SIMILARITY_THRESHOLD = 0.7
+dataFile = '../mols/compounds174.smi'
 #dataFile = '../mols/merged/Reninmerged.smi'
 
 def main():
@@ -27,16 +27,16 @@ def main():
 
     bc_fingerprints = sc.broadcast(fingerprints1.collectAsMap())
 
-    neighbours = calculate_neighbours(fingerprints1, bc_fingerprints)
+    neighbours = calculate_neighbours(fingerprints1, bc_fingerprints).cache()
 
-    mol_neighbour_count, neighbours = get_neighbours_counts(neighbours)
+    mol_neighbour_count, neighbours_with_counts = get_neighbours_counts(neighbours)
 
     bc_mol_neighbour_count = sc.broadcast(mol_neighbour_count.collectAsMap())
 
     #print(bc_mol_neighbour_count.value)
 
     #neighbours.foreach(output)
-    cluster_assignment = neighbours.map(lambda (a,b,c): (a, convert_neighbours_dict(b, bc_mol_neighbour_count.value), c, -1))
+    cluster_assignment = neighbours_with_counts.map(lambda (a,b,c): (a, convert_neighbours_dict(b, bc_mol_neighbour_count.value), c, -1))
     #cluster_assignment.foreach(output)
     print ("------------------------------------------")
     #assign cluster
@@ -80,20 +80,28 @@ def main():
 
         cluster_assignment = cluster_assignment.filter(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value).cache()
         #cluster_assignment.foreach(output)
-        #cluster_assignment = cluster_assignment.map(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): (mol_id,[],mol_count, cluster_assigned))
         cluster_assignment = cluster_assignment.map(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, remove_invalid_nbrs_dict(nbr_counts, bc_invalid_clusters.value, mol_id == cluster_assigned), mol_count, cluster_assigned))
         iteration+=1
 
     #remove tuple of neighbours, count
-    valid_clusters = cluster_assignment.map(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): (mol_id, [x for x,y in nbr_counts]))
+    #valid_clusters = cluster_assignment.map(lambda (mol_id,nbr_counts,mol_count, cluster_assigned): (mol_id, [x for x,y in nbr_counts]))
+    valid_clusters = cluster_assignment.map(
+        lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, 1))
 
-    cluster_combs = valid_clusters.cartesian(valid_clusters)\
+    #valid_clusters.foreach(output)
+    bc_valid_clusters = sc.broadcast(valid_clusters.collectAsMap())
+    complete_clusters = neighbours.filter(lambda(mol_id, nbrs):mol_id in bc_valid_clusters.value)
+
+    #complete_clusters.foreach(output)
+
+    cluster_combs = complete_clusters.cartesian(complete_clusters)\
         .filter(lambda (a,b): (len(a[1]) == len(b[1]) and a[0] >= b[0]) or (len(a[1]) < len(b[1])))
 
     cluster_combs = cluster_combs.map(lambda (a,b): (a[0], set(a[1]).difference(set(b[1]))) if a[0] != b[0] else (a[0], set(a[1])))
 
     cluster_combs = cluster_combs.reduceByKey(lambda a,b: a.intersection(b))
     print("Number of clusters:", cluster_combs.count())
+    print ("--------------------------------------")
     #cluster_combs.foreach(output)
     #if EVALUATION:
     #    cluster_combs = cluster_combs.sortBy(lambda (a,b): a)
