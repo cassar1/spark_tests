@@ -139,6 +139,15 @@ def convert_neighbours_dict(neighbours, complete_list):
     neighbour_counts = sorted(neighbour_counts, key=lambda x: (-x[1], x[0]))
     return neighbour_counts
 
+
+#a single neighbour is provided as a parameter, with complete list being a dictionary of mol_id and count
+def convert_single_neighbour_dict(neighbour, complete_list):
+    return (neighbour, complete_list[neighbour])
+    #return set([(neighbour, complete_list[neighbour])])
+
+def convert_owner_dict(owner, complete_list):
+    return complete_list[owner]
+
 def assign_cluster(this_id, this_count, neighbours, invalid_clusters, current_id):
     if this_id == current_id:
         return current_id
