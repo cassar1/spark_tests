@@ -56,6 +56,7 @@ def index_to_mol(indeces, compound_list):
     compounds = []
     for idx in indeces:
         #get mol item from list
+        #print idx
         compound = compound_list.value[idx][1]
         compound.SetProp("_Name",str(compound_list.value[idx][3]))
         #print (compound_list.value[idx][3])
