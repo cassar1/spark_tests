@@ -8,7 +8,8 @@ import sys
 import time
 
 #conf = SparkConf().setAppName("DistributedClustering")
-conf = SparkConf().setMaster("local").setAppName("MoleculesTests")
+conf = SparkConf() \
+    .setMaster("local").setAppName("MoleculesTests")
 #conf = SparkConf().setMaster(server_location).setAppName("MoleculesTests")
 sc = SparkContext(conf=conf)
 
@@ -23,6 +24,8 @@ SIMILARITY_THRESHOLD = 0.3
 #dataFile = '../mols/compounds18.smi'
 baseFile = '../mols/'
 #baseFile = 'wasb://molecules-container@jurgenhdinsightstorage.blob.core.windows.net/'
+#baseOutputFile = 'wasb://cluster-results@jurgenhdinsightstorage.blob.core.windows.net/'
+executor_num = 1
 #dataFile = '../mols/merged/Reninmerged.smi'
 
 def main():
@@ -31,49 +34,36 @@ def main():
 
     fingerprints = select_fingerprints(compounds)
 
-    fingerprints1 = fingerprints.partitionBy(4).cache()
+    fingerprints1 = fingerprints.partitionBy(executor_num).cache()
 
+    fingerprints1.foreach(output)
     bc_fingerprints = sc.broadcast(fingerprints1.collectAsMap())
-    print("1----------")
+
     neighbour_similarities = calculate_neighbours_similarities(fingerprints1, bc_fingerprints).cache()
-    #neighbour_similarities.foreach(output)
-    print("2----------")
+
     # for each molecule set (mol_id,1) to then reduce and finally get the final number
     molecules_appearances = neighbour_similarities.map(lambda (mol_1,mol_2): (mol_1,1))
     mol_neighbour_count = molecules_appearances.reduceByKey(lambda a, b: a + b)
-    #mol_neighbour_count.foreach(output)
-    print("4----------")
 
     bc_mol_neighbour_count = sc.broadcast(mol_neighbour_count.collectAsMap())
 
     # change from (mol_id, nbr_id) to (mol_id, (nbr_id, nbr_count), nbr_count)
     complete_similarities_fp = neighbour_similarities.map(lambda (a, b): (a, convert_single_neighbour_dict(b, bc_mol_neighbour_count.value),convert_owner_dict(a, bc_mol_neighbour_count.value)))
-    #complete_similarities_fp.foreach(output)
-    print("5----------")
+
 
 #or (mol_nbr_count == nbr[1] and mol_id >= nbr[0])
     subset_similarities_fp = complete_similarities_fp.filter(lambda (mol_id, nbr, mol_nbr_count): mol_nbr_count <= nbr[1])\
         .map(lambda (a,b,c): (a,set([b])))
 
-    #subset_similarities_fp = complete_similarities_fp.map(lambda (a,b,c): (a,set([b])))
-    #subset_similarities_fp.foreach(output)
-    print("6----------")
-    #complete_similarities_fp.foreach(output)
+
     neighbours = subset_similarities_fp.reduceByKey(lambda a, b: a.union(b))
-    print("7----------")
-    print("NEIHGBOURS BEFORE ASSIGNING")
-    #neighbours.foreach(output)
-    print("----------")
+
     neighbours = neighbours.map(lambda (mol, nbrs): (mol, sorted(nbrs, key=lambda x: (-x[1], x[0])))).cache()
-    #neighbours.foreach(output)
+    neighbours.foreach(output)
     # return (mol_id, neighbours, nbr_count of mol_id, -1)
     cluster_assignment = neighbours.map(lambda (a, b): (a,b,convert_owner_dict(a,bc_mol_neighbour_count.value),-1))
-    print("9----------")
-    #cluster_assignment = neighbours_with_counts.map(lambda (a,b,c): (a, convert_neighbours_dict(b, bc_mol_neighbour_count.value), c, -1))
-    #cluster_assignment.foreach(output)
-    print ("------------------------------------------")
-    #assign cluster
 
+    # assign cluster
     bc_invalid_clusters = sc.broadcast([])
 
     bc_valid_condition = sc.broadcast(True)
@@ -83,14 +73,14 @@ def main():
         print ("----------------------------------ITERATION ",iteration ,"----------------------------------------------")
         cluster_assignment = cluster_assignment.map(lambda (mol_id,nb_count_tuple,mol_nbr_count,cluster_assigned) :
                                                     (mol_id,nb_count_tuple,mol_nbr_count,assign_cluster(mol_id, mol_nbr_count, nb_count_tuple, bc_invalid_clusters.value, cluster_assigned))).cache()
-        #cluster_assignment.foreach(output)
+
         #print("----------------------------ASSIGNMENT--------------------------------")
         valid = cluster_assignment.filter(lambda (a, b, c, d): a == d).map(lambda (a, b, c, d): (a, 1))
         total_valids = total_valids.union(valid)
 
         bc_valids = sc.broadcast(valid.collectAsMap())
-        #valid.foreach(output)
-        print("Number of valids:", valid.count())
+
+
         #complete_similarities_fp.filter(lambda (mol, nbr, count): mol in bc_valids.value).foreach(output)
 
         invalid_clusters = complete_similarities_fp.filter(lambda (mol, nbr, count): mol in bc_valids.value) \
@@ -99,13 +89,8 @@ def main():
 
         invalid_clusters = invalid_clusters.map(lambda a:(a,1))
 
-        #dist_invalids = invalid_clusters.distinct().collect()
         dist_invalids = invalid_clusters.collectAsMap()
-        print("START VALIDS")
-        #valid.foreach(output)
-        print("START INVALIDS")
-        #invalid_clusters.foreach(output)
-        print("Invalids:", dist_invalids.__len__())
+
         bc_invalid_clusters = sc.broadcast(dist_invalids)
 
         if dist_invalids.__len__() == 0:
@@ -113,50 +98,30 @@ def main():
         else:
             bc_valid_condition = sc.broadcast(True)
 
+        # remove molecule clusters that are invalid
         cluster_assignment = cluster_assignment.filter(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): mol_id not in bc_invalid_clusters.value).cache()
-        #cluster_assignment.foreach(output)
-        print("-----------------------------------------------------------")
+        # remove molecules in clusters that are invalid
         cluster_assignment = cluster_assignment.map(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, [x for x in nbr_counts if x[0] not in bc_invalid_clusters.value], mol_count, cluster_assigned)).cache()
-        #cluster_assignment.foreach(output)
-        print("-----------------------------------------------------------")
+        #remove clusters that are valid
         cluster_assignment = cluster_assignment.filter(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): mol_id not in bc_valids.value).cache()
-        #cluster_assignment.foreach(output)
-        #cluster_assignment = cluster_assignment.map(lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, remove_invalid_nbrs_dict(nbr_counts, bc_invalid_clusters.value, mol_id == cluster_assigned), mol_count, cluster_assigned))
         iteration += 1
 
 
-    #remove tuple of neighbours, count
-    #valid_clusters = cluster_assignment.map(
-    #    lambda (mol_id, nbr_counts, mol_count, cluster_assigned): (mol_id, 1))
-    print("VALIDS")
-    total_valids.foreach(output)
+
     bc_valid_clusters = sc.broadcast(total_valids.collectAsMap())
-    #print("ALL NEIGHBOURS")
-    #all_nbrs = complete_similarities_fp.map(lambda (a, b, c): (a, set([b[0]]))).reduceByKey(lambda a, b: a.union(b)).map(lambda (a,b): (a,sort_list(list(b))))
-    #all_nbrs.foreach(output)
+
     cluster_centers_single_neighbours = complete_similarities_fp.filter(lambda(mol_id, nbr, nbr_counts):mol_id in bc_valid_clusters.value)\
         .map(lambda (a, b, c): (a, set([b[0]])))
     cluster_neighbours = cluster_centers_single_neighbours.reduceByKey(lambda a, b: a.union(b))
 
-    print("5.5----------")
-
-
-    #complete_clusters = neighbours.filter(lambda(mol_id, nbrs):mol_id in bc_valid_clusters.value)
-    print("NEIGHBOURS")
-    #complete_clusters.foreach(output)
-
-    #print("Number of clusters:", complete_clusters.count())
 
     cluster_combs = cluster_neighbours.cartesian(cluster_neighbours)\
         .filter(lambda (a,b): (len(a[1]) == len(b[1]) and a[0] >= b[0]) or (len(a[1]) < len(b[1])))
-    #cluster_combs.foreach(output)
+
     cluster_combs = cluster_combs.map(lambda (a,b): (a[0], set(a[1]).difference(set(b[1]))) if a[0] != b[0] else (a[0], set(a[1])))
 
     cluster_combs = cluster_combs.reduceByKey(lambda a,b: a.intersection(b))
 
-    print("Number of clusters:", total_valids.count())
-    print ("--------------------------------------")
-    cluster_combs.foreach(output)
     #if EVALUATION:
     #    cluster_combs = cluster_combs.sortBy(lambda (a,b): a)
     #    cluster_combs1 = cluster_combs.map(lambda (a,b): (sort_list(list(b))))
@@ -346,38 +311,37 @@ def output_results(sc, cluster_combs, compounds, evaluate):
         #invert id and molecules
         compounds = compounds.map(lambda (x,y): (y,x))
 
-        print ("TOTAL COUNT", compounds.count())
-        #compounds.foreach(output)
+
         bc_compounds = sc.broadcast(compounds.collectAsMap())
-        print("Here")
         #from the clusters of indeces, get the actual molecule
         #ie. clusters of molecules
 
-        #cluster_combs.foreach(output)
         cluster_mols = cluster_combs.map(lambda (cl_id,compound_ids): index_to_mol(compound_ids, compound_list=bc_compounds))
-        print("Here")
-        print("TOTAL COUNT cluster mols", cluster_mols.count())
+
         #assign ids to clusters
         cluster_groups = cluster_mols.zipWithIndex()
-        print("Here")
+
         #flat the molecules in the format: Smiles string, Molecule Name, Cluster Ids
 
         cluster_groups = cluster_groups.flatMap(lambda (r, idx): [(Chem.MolToSmiles(cmp), cmp.GetProp("_Name"), idx) for cmp in r])
-        #cluster_groups.foreach(output)
+
         #Change molecule data to string
         cluster_groups = cluster_groups.map(lambda (r, name, idx): r + ' ' + name + ' ' + str(idx))
 
         #output to file
-        print("Here")
+
         header = sc.parallelize(["smiles Name Cluster"])
         output_file = cluster_groups.union(header)
-        #output_file.foreach(output)
+
         #output_file.saveAsTextFile("../mols/resultsSpark/result")
         current_time_milli = int(round(time.time() * 1000))
-        output_file.coalesce(1).saveAsTextFile(baseFile + "/output/result"+ str(current_time_milli))
+        outputextension = str(current_time_milli)
+        output_file.coalesce(1).saveAsTextFile(baseFile + "/output" + outputextension + "/result"+ outputextension)
 
 
 if __name__ == '__main__':
     dataFile = baseFile + sys.argv[1] + '.smi'
+    executor_num = int(sys.argv[2]) if len(sys.argv) > 2 else 2
+    print(executor_num , " , Executors")
     print("Data File ",dataFile)
     main()
