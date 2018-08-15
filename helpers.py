@@ -54,6 +54,13 @@ def calculate_tanimoto(fp1,fp2):
     except:
         print "Error fp", fp1, " 2", fp2
 
+
+def calculate_tanimoto_bulk(fp1,fp_list):
+    try:
+        return DataStructs.BulkTanimotoSimilarity(fp1, fp_list)
+    except:
+        print "Error fp", fp1
+
 def toCSVLine(data):
     return ','.join(str(d) for d in data)
 

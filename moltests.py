@@ -13,7 +13,7 @@ EVALUATION = False
 FLATMAPMETHOD = True
 CREATE_VECTORS = False
 SIMILARITY_THRESHOLD = 0.7
-LSH_SIMILARITY = True
+LSH_SIMILARITY = False
 #dataFile = '../mols/compounds18.smi'
 baseFile = '../mols/'
 #baseFile = 'wasb://molecules-container@jurgenhdinsightstorage.blob.core.windows.net/'
@@ -44,7 +44,7 @@ def main():
     #fingerprints1.foreach(output)
     bc_fingerprints = sc.broadcast(fingerprints1.collectAsMap())
     if not LSH_SIMILARITY:
-        neighbour_similarities = calculate_neighbours_similarities(fingerprints1, bc_fingerprints).cache()
+        neighbour_similarities = calculate_neighbours_similarities2(fingerprints1, bc_fingerprints).cache()
     else:
         #vector_fps = fingerprints_to_vectors(fingerprints1)
         #bc_fingerprints = sc.broadcast(vector_fps.collectAsMap())
@@ -293,17 +293,44 @@ def calculate_neighbours(fingerprints, bc_fingerprints):
 
 def calculate_neighbours_similarities(fingerprints, bc_fingerprints):
     # create combinations for all the fingerprints, if condition is used to calculate only upper triangle of the similarity matrix
+
     cartesian_fp = fingerprints.flatMap(
         lambda y: [(y, (x, bc_fingerprints.value[x])) for x in bc_fingerprints.value if x >= y[0]])
 
     # keep only those that have similarity >= threshold a = fp1, b = fp2, c = similarity
     similarities_fp = cartesian_fp.map(lambda (a, b): (a[0], b[0], calculate_tanimoto(a[1], b[1]))) \
         .filter(lambda (a, b, c): c >= SIMILARITY_THRESHOLD)
-
+    #similarities_fp.foreach(output)
     if FLATMAPMETHOD:
         complete_similarities_fp = similarities_fp.flatMap(lambda (a, b, c): [(a,b)] if a == b else [(a, b), (b, a)])
     else:
         # a new rdd is created to get the lower trangle of the similarity matrix
+        inverted_similarities = similarities_fp.map(lambda (a, b, c): (b, a, c))
+        # the complete matrix is obtained through union
+        complete_similarities_fp = similarities_fp.union(inverted_similarities).map(lambda (a, b, c): (a, set([b])))
+
+    return complete_similarities_fp
+
+
+def calculate_neighbours_similarities2(fingerprints, bc_fingerprints):
+    # create combinations for all the fingerprints, if condition is used to calculate only upper triangle of the similarity matrix
+
+    #print(bc_fingerprints.value)
+    #print(bc_fingerprints.value.values())
+
+    cartesian_fp = fingerprints.map(
+        lambda y: (y, bc_fingerprints.value.values()[0:y[0]+1]))
+    #cartesian_fp.foreach(output)
+    # keep only those that have similarity >= threshold a = fp1, b = fp2, c = similarity
+    similarities_fp = cartesian_fp.map(lambda (a, b): (a, b, calculate_tanimoto_bulk(a[1], b)))\
+        .flatMap(lambda (a,b,c): [(a[0], idx, c[idx]) for idx, x in enumerate(b)]) \
+        .filter(lambda (a, b, c): c >= SIMILARITY_THRESHOLD)
+
+    #similarities_fp.foreach(output)
+    if FLATMAPMETHOD:
+        complete_similarities_fp = similarities_fp.flatMap(lambda (a, b, c): [(a,b)] if a == b else [(a, b), (b, a)])
+    else:
+        # a new rdd is created to get the lower triangle of the similarity matrix
         inverted_similarities = similarities_fp.map(lambda (a, b, c): (b, a, c))
         # the complete matrix is obtained through union
         complete_similarities_fp = similarities_fp.union(inverted_similarities).map(lambda (a, b, c): (a, set([b])))
@@ -317,40 +344,11 @@ def fingerprints_to_vectors(fingerprints):
     return vector_fingerprints
 
 
-def calculate_LSH_neighbours(fingerprints):
-    print("calculate_LSH_neighbours")
-    vector_fingerprints = fingerprints.map(lambda (idx, x): (
-    idx, Vectors.sparse(len(x), [(index, value) for (index, value) in enumerate(x) if value != 0]))).cache()
-
-    # represent fingerprints as a vector
-    schemaFps = spark.createDataFrame(vector_fingerprints, ["id", "features"]).cache()
-
-    vector_fingerprints.unpersist()
-
-    mh = MinHashLSH(inputCol="features", outputCol="hashes", numHashTables=5)
-    model = mh.fit(schemaFps)
-
-
-    mol_similarity = model.approxSimilarityJoin(schemaFps, schemaFps, 1 - SIMILARITY_THRESHOLD,distCol="JaccardDistance")\
-        .select(f.col("datasetA.id").alias("source_id"),
-                f.col("datasetB.id").alias("target_id"),
-                f.col("JaccardDistance"))
-
-    #filtered_similarity = mol_similarity.filter(mol_similarity.JaccardDistance > SIMILARITY_THRESHOLD)
-    mol_similarity.orderBy("source_id").show(100)
-    rdd = mol_similarity.rdd.map(tuple)
-
-
-    neighbour_list = rdd.map(lambda (source,target,similarity): (source,target))
-    return neighbour_list
-
 def calculate_LSH_custom(bc_fingerprints, fingerprints):
     num_hashes = 100
 
     permutations = get_permutations(1024, num_hashes)
-    #print("PERMUTATIONS ", permutations)
-    #print (len(permutations[0]))
-    #print(len(permutations))
+
     buckets_allowed = get_buckets_allowed(num_hashes)
 
     bucket = buckets_allowed[0]
@@ -358,30 +356,14 @@ def calculate_LSH_custom(bc_fingerprints, fingerprints):
     fingerprints_hashes = fingerprints.map(
         lambda (idx, fp): (idx, fp, hash_fingerprints(fp, idx, bucket, permutations))).cache()
 
-    #index_hashes = fingerprints_hashes.map(lambda (idx, fp, hash): (idx, hash[idx]))
-    #print("Index Hashes ",index_hashes.count())
-    #bc_hash = sc.broadcast(index_hashes.collectAsMap())
-
-    #index_hashes = fingerprints_hashes.map(lambda (idx, fp, hashes): (idx, hashes[0][idx]))
-    fingerprints_hashes.foreach(output)
-    #index_hashes.foreach(output)
     hash_list = fingerprints_hashes.flatMap(lambda (idx, fp, hashes): hashes[1])
 
-    hash_list.foreach(output)
     print(hash_list.count())
     complete_hash_list = hash_list.reduceByKey(lambda a, b: a.union(b))
-    #complete_hash_list.foreach(output)
-
-    #bc_hash = spark.sparkContext.broadcast(index_hashes.collectAsMap())
     bc_hash_list = spark.sparkContext.broadcast(complete_hash_list.collectAsMap())
 
-    #potential_neighbours = fingerprints_hashes.map(lambda (idx, fp, hash): (idx, get_neighbours(bc_hash.value, idx)))
-    #UPDATE HERE..... INDEX HASHES DOES NOT REQUIRE BROADCAST
     potential_neighbours = fingerprints_hashes.map(
         lambda (idx, fp, hash): (idx, get_neighbours(hash[0], bc_hash_list.value, idx)))
-    # neighbours = potential_neighbours.map(lambda (idx, nbrs): (idx, get_threshold_neighbours(bc_fingerprints.value, idx, nbrs, SIMILARITY_THRESHOLD)))
-
-    #potential_neighbours.foreach(output)
 
     neighbours = potential_neighbours.flatMap(
         lambda (idx, nbrs): (get_threshold_neighbours_flat2(bc_fingerprints.value, idx, nbrs, SIMILARITY_THRESHOLD)))
