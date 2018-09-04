@@ -28,8 +28,8 @@ def convertToBitVectorFP(line):
         #mol.SetProp("_Name",str(elements[1]))
         fingerprint = AllChem.GetMorganFingerprintAsBitVect(mol,2, nBits=1024)
         #base64Fp = fingerprint.ToBitString()
-    else:
-        print elements[0]
+    #else:
+    #    print elements[0]
     return (elements[0], mol, fingerprint,elements[1])
 
 
